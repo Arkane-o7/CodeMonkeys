@@ -3,41 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Web Assistant</title>
+    <title>Web Assistant Chat</title>
     <link rel="stylesheet" href="sidebar.css">
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1>Voice Web Assistant</h1>
-            <p class="tagline">Speak your commands naturally</p>
+            <h1>Web Assistant</h1>
+            <p class="tagline">Chat with your AI web helper</p>
         </header>
         
         <div class="status-indicator">
             <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">Ready to listen</span>
+            <span id="statusText">Ready to chat</span>
         </div>
         
-        <div class="voice-controls">
-            <button id="startVoiceBtn" class="voice-btn primary">
-                🎤 Start Listening
-            </button>
-            <button id="stopVoiceBtn" class="voice-btn secondary" disabled>
-                ⏹️ Stop
-            </button>
-        </div>
-        
-        <div class="transcript-section">
-            <h3>What you said:</h3>
-            <div id="transcript" class="transcript-box">
-                Say something like "Go to Google and search for weather"
+        <div class="chat-container">
+            <div class="chat-messages" id="chatMessages">
+                <div class="message assistant-message">
+                    <div class="message-content">
+                        Hello! I'm your web assistant. Type a command or click the voice button to get started. 
+                        <br><br>Try: "Go to Google and search for weather"
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div class="ai-response-section">
-            <h3>AI Response:</h3>
-            <div id="aiResponse" class="response-box">
-                I'm ready to help you navigate the web!
+        <div class="input-container">
+            <div class="input-wrapper">
+                <input type="text" id="messageInput" placeholder="Type your command here..." />
+                <button id="voiceBtn" class="voice-btn" title="Use voice input">
+                    🎤
+                </button>
+                <button id="sendBtn" class="send-btn" title="Send message">
+                    📤
+                </button>
             </div>
         </div>
         
@@ -49,6 +49,7 @@
         </div>
         
         <div class="controls">
+            <button id="clearChatBtn" class="control-btn">Clear Chat</button>
             <button id="clearLogBtn" class="control-btn">Clear Log</button>
             <button id="settingsBtn" class="control-btn">Settings</button>
         </div>
