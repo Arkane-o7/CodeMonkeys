@@ -1,0 +1,21 @@
+/* Additional styles for content script highlighting */
+.voice-assistant-highlight {
+    outline: 3px solid #FF6B35 !important;
+    outline-offset: 2px !important;
+    background-color: rgba(255, 107, 53, 0.1) !important;
+    transition: all 0.3s ease !important;
+}
+
+.voice-assistant-typing {
+    background-color: rgba(76, 175, 80, 0.2) !important;
+}
+
+.voice-assistant-clicked {
+    animation: clickEffect 0.5s ease-out !important;
+}
+
+@keyframes clickEffect {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Web Assistant</title>
+    <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Voice Web Assistant</h1>
+            <p class="tagline">Speak your commands naturally</p>
+        </header>
+        
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Ready to listen</span>
+        </div>
+        
+        <div class="voice-controls">
+            <button id="startVoiceBtn" class="voice-btn primary">
+                🎤 Start Listening
+            </button>
+            <button id="stopVoiceBtn" class="voice-btn secondary" disabled>
+                ⏹️ Stop
+            </button>
+        </div>
+        
+        <div class="transcript-section">
+            <h3>What you said:</h3>
+            <div id="transcript" class="transcript-box">
+                Say something like "Go to Google and search for weather"
+            </div>
+        </div>
+        
+        <div class="ai-response-section">
+            <h3>AI Response:</h3>
+            <div id="aiResponse" class="response-box">
+                I'm ready to help you navigate the web!
+            </div>
+        </div>
+        
+        <div class="action-log">
+            <h3>Actions Performed:</h3>
+            <div id="actionLog" class="log-box">
+                <!-- Actions will be logged here -->
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="clearLogBtn" class="control-btn">Clear Log</button>
+            <button id="settingsBtn" class="control-btn">Settings</button>
+        </div>
+    </div>
+    
+    <script src="sidebar.js"></script>
+</body>
+</html>

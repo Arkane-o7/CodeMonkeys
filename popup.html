@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Web Assistant</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        h1 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            text-align: center;
+        }
+        
+        .description {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 14px;
+            opacity: 0.9;
+            line-height: 1.4;
+        }
+        
+        .open-sidebar-btn {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 15px;
+        }
+        
+        .open-sidebar-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .features {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        .features ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        
+        .features li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎤 Voice Web Assistant</h1>
+    
+    <div class="description">
+        Control websites with your voice. Perfect for hands-free browsing and accessibility.
+    </div>
+    
+    <button id="openSidebarBtn" class="open-sidebar-btn">
+        Open Voice Assistant
+    </button>
+    
+    <div class="features">
+        <strong>Voice Commands:</strong>
+        <ul>
+            <li>"Go to Google"</li>
+            <li>"Search for cats"</li>
+            <li>"Click on login"</li>
+            <li>"Type my email"</li>
+            <li>"Scroll down"</li>
+        </ul>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
