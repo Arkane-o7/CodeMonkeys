@@ -13,6 +13,21 @@ class WebPageController {
                     .then(result => sendResponse({ success: true, result }))
                     .catch(error => sendResponse({ success: false, error: error.message }));
                 return true; // Will respond asynchronously
+            } else if (message.type === 'EXECUTE_ENHANCED_ACTION') {
+                this.executeEnhancedAction(message.action)
+                    .then(result => sendResponse({ success: true, result }))
+                    .catch(error => sendResponse({ success: false, error: error.message }));
+                return true; // Will respond asynchronously
+            } else if (message.type === 'GET_PAGE_CONTENT') {
+                this.getPageContent()
+                    .then(result => sendResponse({ success: true, result }))
+                    .catch(error => sendResponse({ success: false, error: error.message }));
+                return true; // Will respond asynchronously
+            } else if (message.type === 'ANALYZE_PAGE_ELEMENTS') {
+                this.analyzePageElements()
+                    .then(result => sendResponse({ success: true, result }))
+                    .catch(error => sendResponse({ success: false, error: error.message }));
+                return true; // Will respond asynchronously
             }
         });
     }
@@ -304,6 +319,507 @@ class WebPageController {
 
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Enhanced action execution for autonomous agent
+    async executeEnhancedAction(action) {
+        this.showLoadingIndicator(`Executing: ${action.type}`);
+        
+        try {
+            switch (action.type) {
+                case 'goto':
+                    return await this.navigate(action.parameters.url);
+                case 'click':
+                    return await this.clickElementEnhanced(action.parameters);
+                case 'type':
+                    return await this.typeTextEnhanced(action.parameters);
+                case 'select':
+                    return await this.selectOption(action.parameters);
+                case 'scroll':
+                    return await this.scrollEnhanced(action.parameters);
+                case 'hover':
+                    return await this.hoverElement(action.parameters);
+                case 'wait_for_element':
+                    return await this.waitForElement(action.parameters);
+                case 'handle_popup':
+                    return await this.handlePopup(action.parameters);
+                case 'navigate':
+                    return await this.navigate(action.parameters.url);
+                default:
+                    throw new Error(`Unknown enhanced action type: ${action.type}`);
+            }
+        } finally {
+            this.hideLoadingIndicator();
+        }
+    }
+
+    // Enhanced click with better element finding
+    async clickElementEnhanced(parameters) {
+        const { selector, text, xpath } = parameters;
+        let element = null;
+
+        // Try different methods to find the element
+        if (selector) {
+            element = document.querySelector(selector);
+        } else if (xpath) {
+            element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        } else if (text) {
+            element = this.findElementByTextEnhanced(text);
+        }
+
+        if (!element) {
+            throw new Error(`Element not found. Selector: ${selector}, Text: ${text}, XPath: ${xpath}`);
+        }
+
+        this.logAction(`Clicking element: ${element.tagName} ${element.textContent?.substring(0, 50) || ''}`);
+        
+        // Scroll element into view
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+
+        // Highlight the element
+        this.highlightElement(element);
+        await this.sleep(1000);
+
+        // Add click animation
+        element.classList.add('voice-assistant-clicked');
+        
+        // Click the element
+        element.click();
+        
+        await this.sleep(500);
+        this.removeHighlight();
+
+        return { 
+            success: true, 
+            message: `Clicked element: ${element.tagName}`,
+            elementInfo: {
+                tagName: element.tagName,
+                text: element.textContent?.substring(0, 100),
+                attributes: this.getElementAttributes(element)
+            }
+        };
+    }
+
+    // Enhanced text typing with better input field detection
+    async typeTextEnhanced(parameters) {
+        const { selector, text, xpath, clearFirst = true } = parameters;
+        let element = null;
+
+        // Try different methods to find input element
+        if (selector) {
+            element = document.querySelector(selector);
+        } else if (xpath) {
+            element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        } else {
+            element = this.findInputElementEnhanced();
+        }
+
+        if (!element) {
+            throw new Error(`Input element not found. Selector: ${selector}, XPath: ${xpath}`);
+        }
+
+        this.logAction(`Typing "${text}" into ${element.tagName}`);
+
+        // Scroll element into view and focus
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+
+        element.focus();
+        this.highlightElement(element);
+        
+        if (clearFirst) {
+            element.value = '';
+        }
+
+        element.classList.add('voice-assistant-typing');
+
+        // Type character by character for more natural interaction
+        for (const char of text) {
+            element.value += char;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            await this.sleep(50); // Typing animation delay
+        }
+
+        // Trigger change event
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        await this.sleep(500);
+
+        element.classList.remove('voice-assistant-typing');
+        this.removeHighlight();
+
+        return { 
+            success: true, 
+            message: `Typed "${text}" into input field`,
+            elementInfo: {
+                tagName: element.tagName,
+                type: element.type,
+                value: element.value
+            }
+        };
+    }
+
+    // Select option from dropdown
+    async selectOption(parameters) {
+        const { selector, value, text, xpath } = parameters;
+        let element = null;
+
+        if (selector) {
+            element = document.querySelector(selector);
+        } else if (xpath) {
+            element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        } else {
+            element = document.querySelector('select');
+        }
+
+        if (!element || element.tagName !== 'SELECT') {
+            throw new Error(`Select element not found or invalid. Selector: ${selector}, XPath: ${xpath}`);
+        }
+
+        this.logAction(`Selecting option: ${value || text}`);
+
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+
+        this.highlightElement(element);
+        
+        // Find the option to select
+        let option = null;
+        if (value) {
+            option = element.querySelector(`option[value="${value}"]`);
+        } else if (text) {
+            const options = Array.from(element.options);
+            option = options.find(opt => opt.textContent.includes(text));
+        }
+
+        if (!option) {
+            throw new Error(`Option not found. Value: ${value}, Text: ${text}`);
+        }
+
+        option.selected = true;
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        await this.sleep(500);
+        this.removeHighlight();
+
+        return { 
+            success: true, 
+            message: `Selected option: ${option.textContent}`,
+            elementInfo: {
+                selectedValue: element.value,
+                selectedText: option.textContent
+            }
+        };
+    }
+
+    // Enhanced scrolling with better control
+    async scrollEnhanced(parameters) {
+        const { direction = 'down', amount = 300, element: elementSelector } = parameters;
+        
+        let targetElement = document.documentElement;
+        if (elementSelector) {
+            const el = document.querySelector(elementSelector);
+            if (el) targetElement = el;
+        }
+
+        const scrollAmount = direction === 'up' ? -amount : amount;
+        
+        this.logAction(`Scrolling ${direction} by ${amount}px`);
+
+        targetElement.scrollBy({
+            top: scrollAmount,
+            behavior: 'smooth'
+        });
+
+        await this.sleep(1000); // Wait for scroll to complete
+
+        return { 
+            success: true, 
+            message: `Scrolled ${direction}`,
+            scrollInfo: {
+                direction,
+                amount,
+                newScrollPosition: targetElement.scrollTop
+            }
+        };
+    }
+
+    // Hover over element
+    async hoverElement(parameters) {
+        const { selector, text, xpath } = parameters;
+        let element = null;
+
+        if (selector) {
+            element = document.querySelector(selector);
+        } else if (xpath) {
+            element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        } else if (text) {
+            element = this.findElementByTextEnhanced(text);
+        }
+
+        if (!element) {
+            throw new Error(`Element not found for hover. Selector: ${selector}, Text: ${text}, XPath: ${xpath}`);
+        }
+
+        this.logAction(`Hovering over element: ${element.tagName}`);
+
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await this.sleep(500);
+
+        // Simulate hover
+        element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        
+        this.highlightElement(element);
+        await this.sleep(2000); // Keep hover for 2 seconds
+        
+        element.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+        element.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+        
+        this.removeHighlight();
+
+        return { 
+            success: true, 
+            message: `Hovered over element: ${element.tagName}`,
+            elementInfo: {
+                tagName: element.tagName,
+                text: element.textContent?.substring(0, 100)
+            }
+        };
+    }
+
+    // Wait for element to appear
+    async waitForElement(parameters) {
+        const { selector, text, xpath, timeout = 10000 } = parameters;
+        const startTime = Date.now();
+
+        this.logAction(`Waiting for element: ${selector || text || xpath}`);
+
+        return new Promise((resolve, reject) => {
+            const checkElement = () => {
+                let element = null;
+
+                if (selector) {
+                    element = document.querySelector(selector);
+                } else if (xpath) {
+                    element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                } else if (text) {
+                    element = this.findElementByTextEnhanced(text);
+                }
+
+                if (element) {
+                    resolve({ 
+                        success: true, 
+                        message: `Element found: ${element.tagName}`,
+                        elementInfo: {
+                            tagName: element.tagName,
+                            text: element.textContent?.substring(0, 100)
+                        }
+                    });
+                } else if (Date.now() - startTime > timeout) {
+                    reject(new Error(`Element not found within ${timeout}ms timeout`));
+                } else {
+                    setTimeout(checkElement, 100);
+                }
+            };
+
+            checkElement();
+        });
+    }
+
+    // Handle popup or dialog
+    async handlePopup(parameters) {
+        const { action = 'accept', text } = parameters;
+
+        this.logAction(`Handling popup with action: ${action}`);
+
+        // Check for JavaScript dialogs
+        if (window.confirm || window.alert || window.prompt) {
+            // Note: Modern browsers don't allow scripts to interact with native dialogs
+            // This is a placeholder for custom popup handling
+        }
+
+        // Look for modal dialogs or overlays
+        const modalSelectors = [
+            '.modal', '[role="dialog"]', '.dialog', '.popup',
+            '.overlay', '[aria-modal="true"]', '.modal-dialog'
+        ];
+
+        let modal = null;
+        for (const selector of modalSelectors) {
+            modal = document.querySelector(selector);
+            if (modal && modal.offsetParent !== null) break; // Check if visible
+        }
+
+        if (modal) {
+            if (action === 'accept' || action === 'ok') {
+                // Look for accept/ok buttons
+                const acceptButtons = modal.querySelectorAll(
+                    'button, [role="button"], input[type="submit"], input[type="button"]'
+                );
+                const acceptButton = Array.from(acceptButtons).find(btn => 
+                    /ok|accept|confirm|yes|continue/i.test(btn.textContent || btn.value)
+                );
+                
+                if (acceptButton) {
+                    acceptButton.click();
+                    await this.sleep(500);
+                }
+            } else if (action === 'dismiss' || action === 'cancel') {
+                // Look for close/cancel buttons
+                const dismissButtons = modal.querySelectorAll(
+                    'button, [role="button"], .close, [aria-label*="close"], [title*="close"]'
+                );
+                const dismissButton = Array.from(dismissButtons).find(btn => 
+                    /close|cancel|dismiss|no|×/i.test(btn.textContent || btn.value || btn.title || btn.getAttribute('aria-label'))
+                );
+                
+                if (dismissButton) {
+                    dismissButton.click();
+                    await this.sleep(500);
+                }
+            }
+        }
+
+        return { 
+            success: true, 
+            message: `Handled popup with action: ${action}`,
+            popupFound: !!modal
+        };
+    }
+
+    // Enhanced element finding by text
+    findElementByTextEnhanced(text) {
+        const xpath = `//*[contains(text(), "${text}") or contains(@value, "${text}") or contains(@placeholder, "${text}") or contains(@title, "${text}") or contains(@aria-label, "${text}")]`;
+        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        
+        // Return the first visible element
+        for (let i = 0; i < result.snapshotLength; i++) {
+            const element = result.snapshotItem(i);
+            if (element.offsetParent !== null) { // Check if visible
+                return element;
+            }
+        }
+        
+        return null;
+    }
+
+    // Enhanced input element finding
+    findInputElementEnhanced() {
+        const inputSelectors = [
+            'input[type="text"]:not([style*="display: none"]):not([hidden])',
+            'input:not([type]):not([style*="display: none"]):not([hidden])',
+            'input[type="email"]:not([style*="display: none"]):not([hidden])',
+            'input[type="search"]:not([style*="display: none"]):not([hidden])',
+            'input[type="url"]:not([style*="display: none"]):not([hidden])',
+            'input[type="tel"]:not([style*="display: none"]):not([hidden])',
+            'textarea:not([style*="display: none"]):not([hidden])',
+            '[contenteditable="true"]:not([style*="display: none"]):not([hidden])'
+        ];
+
+        for (const selector of inputSelectors) {
+            const elements = document.querySelectorAll(selector);
+            const visibleElement = Array.from(elements).find(el => el.offsetParent !== null);
+            if (visibleElement) return visibleElement;
+        }
+
+        return null;
+    }
+
+    // Get page content for AI analysis
+    async getPageContent() {
+        const result = {
+            url: window.location.href,
+            title: document.title,
+            html: document.documentElement.outerHTML,
+            text: document.body.innerText || document.body.textContent,
+            timestamp: new Date().toISOString()
+        };
+
+        return result;
+    }
+
+    // Analyze page elements for AI
+    async analyzePageElements() {
+        const elements = [];
+        
+        // Find all interactive elements
+        const selectors = [
+            'a[href]', 'button', 'input', 'select', 'textarea',
+            '[onclick]', '[role="button"]', '[role="link"]',
+            '[tabindex]:not([tabindex="-1"])', '[contenteditable="true"]'
+        ];
+
+        selectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach((el, index) => {
+                if (el.offsetParent !== null) { // Only visible elements
+                    elements.push({
+                        tagName: el.tagName.toLowerCase(),
+                        type: el.type || null,
+                        text: el.textContent?.trim().substring(0, 100) || '',
+                        value: el.value || '',
+                        href: el.href || null,
+                        id: el.id || null,
+                        className: el.className || '',
+                        placeholder: el.placeholder || '',
+                        title: el.title || '',
+                        ariaLabel: el.getAttribute('aria-label') || '',
+                        selector: this.generateSelector(el),
+                        position: {
+                            x: el.offsetLeft,
+                            y: el.offsetTop,
+                            width: el.offsetWidth,
+                            height: el.offsetHeight
+                        }
+                    });
+                }
+            });
+        });
+
+        return {
+            elements,
+            totalElements: elements.length,
+            pageInfo: {
+                url: window.location.href,
+                title: document.title,
+                description: document.querySelector('meta[name="description"]')?.content || ''
+            }
+        };
+    }
+
+    // Generate CSS selector for element
+    generateSelector(element) {
+        if (element.id) {
+            return `#${element.id}`;
+        }
+        
+        let selector = element.tagName.toLowerCase();
+        
+        if (element.className) {
+            const classes = element.className.split(' ').filter(c => c).join('.');
+            if (classes) selector += `.${classes}`;
+        }
+        
+        // Add position-based selector if needed
+        const parent = element.parentElement;
+        if (parent) {
+            const siblings = Array.from(parent.children);
+            const index = siblings.indexOf(element);
+            if (siblings.length > 1) {
+                selector += `:nth-child(${index + 1})`;
+            }
+        }
+        
+        return selector;
+    }
+
+    // Get element attributes
+    getElementAttributes(element) {
+        const attributes = {};
+        for (const attr of element.attributes) {
+            attributes[attr.name] = attr.value;
+        }
+        return attributes;
     }
 }
 

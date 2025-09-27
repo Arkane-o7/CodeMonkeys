@@ -18,6 +18,30 @@
             <span id="statusText">Ready to listen</span>
         </div>
         
+        <!-- AI Configuration Section -->
+        <div class="ai-config-section" id="aiConfigSection">
+            <h3>🤖 AI Configuration</h3>
+            <div class="config-status" id="configStatus">
+                <span id="aiStatusText">AI Not Configured</span>
+                <button id="configureAiBtn" class="config-btn">Configure AI</button>
+            </div>
+            <div class="ai-config-form" id="aiConfigForm" style="display: none;">
+                <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" />
+                <button id="saveApiKeyBtn" class="save-btn">Save</button>
+                <button id="cancelConfigBtn" class="cancel-btn">Cancel</button>
+                <p class="config-help">Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
+            </div>
+        </div>
+
+        <!-- Mode Selection -->
+        <div class="mode-selection">
+            <h3>🎯 Mode</h3>
+            <div class="mode-buttons">
+                <button id="basicModeBtn" class="mode-btn active">Basic Voice</button>
+                <button id="autonomousModeBtn" class="mode-btn" disabled>Autonomous AI</button>
+            </div>
+        </div>
+
         <div class="voice-controls">
             <button id="startVoiceBtn" class="voice-btn primary">
                 🎤 Start Listening
@@ -25,6 +49,19 @@
             <button id="stopVoiceBtn" class="voice-btn secondary" disabled>
                 ⏹️ Stop
             </button>
+        </div>
+
+        <!-- Autonomous Agent Progress -->
+        <div class="agent-progress" id="agentProgress" style="display: none;">
+            <h3>🤖 Agent Progress</h3>
+            <div class="progress-info">
+                <div id="progressText">Analyzing your goal...</div>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+                <div id="progressSteps">Step 0 of 0</div>
+                <button id="stopAgentBtn" class="stop-agent-btn">Stop Agent</button>
+            </div>
         </div>
         
         <div class="transcript-section">

@@ -2,10 +2,13 @@ class VoiceWebAssistant {
     constructor() {
         this.recognition = null;
         this.isListening = false;
+        this.currentMode = 'basic'; // 'basic' or 'autonomous'
+        this.aiConfigured = false;
         this.initializeElements();
         this.initializeVoiceRecognition();
         this.setupEventListeners();
         this.setupMessageListener();
+        this.checkAIStatus();
     }
 
     initializeElements() {
@@ -18,6 +21,27 @@ class VoiceWebAssistant {
         this.actionLog = document.getElementById('actionLog');
         this.clearLogBtn = document.getElementById('clearLogBtn');
         this.settingsBtn = document.getElementById('settingsBtn');
+        
+        // AI Configuration elements
+        this.aiConfigSection = document.getElementById('aiConfigSection');
+        this.configStatus = document.getElementById('configStatus');
+        this.aiStatusText = document.getElementById('aiStatusText');
+        this.configureAiBtn = document.getElementById('configureAiBtn');
+        this.aiConfigForm = document.getElementById('aiConfigForm');
+        this.apiKeyInput = document.getElementById('apiKeyInput');
+        this.saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
+        this.cancelConfigBtn = document.getElementById('cancelConfigBtn');
+        
+        // Mode selection elements
+        this.basicModeBtn = document.getElementById('basicModeBtn');
+        this.autonomousModeBtn = document.getElementById('autonomousModeBtn');
+        
+        // Agent progress elements
+        this.agentProgress = document.getElementById('agentProgress');
+        this.progressText = document.getElementById('progressText');
+        this.progressFill = document.getElementById('progressFill');
+        this.progressSteps = document.getElementById('progressSteps');
+        this.stopAgentBtn = document.getElementById('stopAgentBtn');
     }
 
     initializeVoiceRecognition() {
@@ -74,6 +98,18 @@ class VoiceWebAssistant {
         this.stopVoiceBtn.addEventListener('click', () => this.stopListening());
         this.clearLogBtn.addEventListener('click', () => this.clearLog());
         this.settingsBtn.addEventListener('click', () => this.openSettings());
+        
+        // AI Configuration event listeners
+        this.configureAiBtn.addEventListener('click', () => this.showAIConfig());
+        this.saveApiKeyBtn.addEventListener('click', () => this.saveApiKey());
+        this.cancelConfigBtn.addEventListener('click', () => this.hideAIConfig());
+        
+        // Mode selection event listeners
+        this.basicModeBtn.addEventListener('click', () => this.switchMode('basic'));
+        this.autonomousModeBtn.addEventListener('click', () => this.switchMode('autonomous'));
+        
+        // Agent control event listeners
+        this.stopAgentBtn.addEventListener('click', () => this.stopAutonomousAgent());
     }
 
     setupMessageListener() {
@@ -125,26 +161,57 @@ class VoiceWebAssistant {
                 throw new Error('Extension context not available');
             }
             
-            // Send command to background script for AI processing
-            const response = await chrome.runtime.sendMessage({
-                type: 'PROCESS_COMMAND',
-                command: command
-            });
+            let response;
             
-            if (response && response.success) {
-                this.updateAiResponse(response.aiResponse);
-                // Execute the action via content script
-                await this.executeAction(response.action);
+            if (this.currentMode === 'autonomous' && this.aiConfigured) {
+                // Use autonomous AI agent
+                response = await chrome.runtime.sendMessage({
+                    type: 'PROCESS_AUTONOMOUS_GOAL',
+                    goal: command
+                });
+                
+                if (response && response.success && response.result) {
+                    this.updateAiResponse(response.aiResponse);
+                    
+                    if (response.result.requiresWebInteraction === false) {
+                        // Simple query, no action needed
+                        this.updateStatus('ready', 'Ready for next command');
+                        return;
+                    }
+                    
+                    // Show agent progress for autonomous mode
+                    this.showAgentProgress();
+                }
             } else {
+                // Use basic voice command processing
+                response = await chrome.runtime.sendMessage({
+                    type: 'PROCESS_COMMAND',
+                    command: command
+                });
+                
+                if (response && response.success) {
+                    this.updateAiResponse(response.aiResponse);
+                    // Execute the action via content script for basic mode
+                    await this.executeAction(response.action);
+                }
+            }
+            
+            if (response && response.requiresConfiguration) {
+                // Show AI configuration if needed
+                this.showAIConfig();
+            } else if (!response || !response.success) {
                 this.updateAiResponse('Sorry, I couldn\'t understand that command.');
                 this.logAction('Command processing failed', 'error');
             }
+            
         } catch (error) {
             this.logAction(`Error processing command: ${error.message}`, 'error');
             this.updateAiResponse('Sorry, there was an error processing your command.');
         }
         
-        this.updateStatus('ready', 'Ready for next command');
+        if (this.currentMode !== 'autonomous') {
+            this.updateStatus('ready', 'Ready for next command');
+        }
     }
 
     async executeAction(action) {
@@ -219,9 +286,139 @@ class VoiceWebAssistant {
     }
 
     openSettings() {
-        this.logAction('Settings clicked');
-        // TODO: Implement settings panel
-        alert('Settings panel coming soon!');
+        alert('Settings functionality coming soon! For now, use the AI Configuration section above to set up autonomous mode.');
+    }
+
+    // AI Configuration methods
+    async checkAIStatus() {
+        try {
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                const response = await chrome.runtime.sendMessage({ type: 'GET_AI_STATUS' });
+                if (response && response.success) {
+                    this.updateAIStatus(response.aiInitialized, response.agentActive);
+                }
+            }
+        } catch (error) {
+            console.log('Could not check AI status:', error.message);
+        }
+    }
+
+    updateAIStatus(aiInitialized, agentActive = false) {
+        this.aiConfigured = aiInitialized;
+        
+        if (aiInitialized) {
+            this.aiStatusText.textContent = '✅ AI Configured';
+            this.configureAiBtn.textContent = 'Reconfigure';
+            this.autonomousModeBtn.disabled = false;
+        } else {
+            this.aiStatusText.textContent = '❌ AI Not Configured';
+            this.configureAiBtn.textContent = 'Configure AI';
+            this.autonomousModeBtn.disabled = true;
+            this.switchMode('basic');
+        }
+
+        if (agentActive) {
+            this.showAgentProgress();
+        } else {
+            this.hideAgentProgress();
+        }
+    }
+
+    showAIConfig() {
+        this.aiConfigForm.style.display = 'block';
+        this.apiKeyInput.focus();
+    }
+
+    hideAIConfig() {
+        this.aiConfigForm.style.display = 'none';
+        this.apiKeyInput.value = '';
+    }
+
+    async saveApiKey() {
+        const apiKey = this.apiKeyInput.value.trim();
+        
+        if (!apiKey) {
+            alert('Please enter a valid API key');
+            return;
+        }
+
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: 'CONFIGURE_AI',
+                apiKey: apiKey
+            });
+
+            if (response && response.success) {
+                this.updateAIStatus(true);
+                this.hideAIConfig();
+                this.logAction('AI configured successfully', 'info');
+                this.updateAiResponse('AI is now configured! You can switch to Autonomous AI mode.');
+            } else {
+                alert(response?.message || 'Failed to configure AI. Please check your API key.');
+                this.logAction('AI configuration failed', 'error');
+            }
+        } catch (error) {
+            alert('Error configuring AI: ' + error.message);
+            this.logAction('AI configuration error: ' + error.message, 'error');
+        }
+    }
+
+    // Mode switching methods
+    switchMode(mode) {
+        if (mode === 'autonomous' && !this.aiConfigured) {
+            alert('Please configure AI first to use Autonomous mode');
+            return;
+        }
+
+        this.currentMode = mode;
+        
+        // Update UI
+        this.basicModeBtn.classList.toggle('active', mode === 'basic');
+        this.autonomousModeBtn.classList.toggle('active', mode === 'autonomous');
+
+        // Update instructions
+        if (mode === 'autonomous') {
+            this.transcript.innerHTML = 'Autonomous AI Mode: Describe your goal naturally<br>e.g., "Go to Amazon and buy wireless headphones under $50"';
+            this.updateAiResponse('🤖 Autonomous AI Mode activated! Describe your goal and I\'ll break it down into steps and execute them.');
+        } else {
+            this.transcript.innerHTML = 'Say something like "Go to Google and search for weather"';
+            this.updateAiResponse('Basic Voice Mode: I can help with simple commands like navigation, search, clicking, and typing.');
+        }
+
+        this.logAction(`Switched to ${mode} mode`, 'info');
+    }
+
+    // Agent progress methods
+    showAgentProgress() {
+        this.agentProgress.style.display = 'block';
+        this.updateAgentProgress('Starting autonomous agent...', 0, 0, 1);
+    }
+
+    hideAgentProgress() {
+        this.agentProgress.style.display = 'none';
+    }
+
+    updateAgentProgress(text, currentStep, totalSteps, progressPercent = 0) {
+        this.progressText.textContent = text;
+        this.progressSteps.textContent = `Step ${currentStep} of ${totalSteps}`;
+        this.progressFill.style.width = `${Math.max(0, Math.min(100, progressPercent))}%`;
+    }
+
+    async stopAutonomousAgent() {
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: 'STOP_AUTONOMOUS_AGENT'
+            });
+            
+            if (response && response.success) {
+                this.hideAgentProgress();
+                this.updateAiResponse('Autonomous agent stopped.');
+                this.logAction('Autonomous agent stopped by user', 'warning');
+                this.updateStatus('ready', 'Ready for next command');
+            }
+        } catch (error) {
+            this.logAction('Error stopping agent: ' + error.message, 'error');
+        }
     }
 }
 

@@ -1,8 +1,40 @@
 class VoiceAssistantBackground {
     constructor() {
+        this.aiService = null;
+        this.autonomousAgent = null;
         this.setupMessageListeners();
         this.setupSidePanel();
-        console.log('Voice Assistant background script loaded');
+        this.initializeAI();
+        console.log('Enhanced Voice Assistant background script loaded');
+    }
+
+    async initializeAI() {
+        try {
+            // Import AI service (we'll need to load it differently in a real extension)
+            // For now, we'll instantiate it here
+            this.aiService = {
+                isInitialized: () => false,
+                setApiKey: async (key) => false,
+                // Placeholder methods
+                generateHighLevelPlan: async () => { throw new Error('AI Service not configured'); },
+                analyzePageStructure: async () => { throw new Error('AI Service not configured'); },
+                decideNextAction: async () => { throw new Error('AI Service not configured'); },
+                verifyActionOutcome: async () => { throw new Error('AI Service not configured'); },
+                handleErrorRecovery: async () => { throw new Error('AI Service not configured'); }
+            };
+            
+            // Initialize autonomous agent with placeholder
+            this.autonomousAgent = {
+                processUserGoal: async () => { throw new Error('AI Service not configured'); },
+                isActive: () => false,
+                stop: () => {},
+                getCurrentProgress: () => ({ currentStep: 0, totalSteps: 0, isRunning: false })
+            };
+            
+            console.log('AI service initialized (placeholder mode)');
+        } catch (error) {
+            console.error('Failed to initialize AI service:', error);
+        }
     }
 
     setupMessageListeners() {
@@ -15,6 +47,32 @@ class VoiceAssistantBackground {
                         error: error.message 
                     }));
                 return true; // Will respond asynchronously
+            } else if (message.type === 'PROCESS_AUTONOMOUS_GOAL') {
+                this.processAutonomousGoal(message.goal)
+                    .then(response => sendResponse(response))
+                    .catch(error => sendResponse({ 
+                        success: false, 
+                        error: error.message 
+                    }));
+                return true; // Will respond asynchronously
+            } else if (message.type === 'CONFIGURE_AI') {
+                this.configureAI(message.apiKey)
+                    .then(response => sendResponse(response))
+                    .catch(error => sendResponse({ 
+                        success: false, 
+                        error: error.message 
+                    }));
+                return true; // Will respond asynchronously
+            } else if (message.type === 'GET_AI_STATUS') {
+                sendResponse({
+                    success: true,
+                    aiInitialized: this.aiService?.isInitialized() || false,
+                    agentActive: this.autonomousAgent?.isActive() || false,
+                    agentProgress: this.autonomousAgent?.getCurrentProgress() || null
+                });
+            } else if (message.type === 'STOP_AUTONOMOUS_AGENT') {
+                this.autonomousAgent?.stop();
+                sendResponse({ success: true, message: 'Autonomous agent stopped' });
             } else if (message.type === 'CONTENT_LOG') {
                 // Forward content script logs to sidebar
                 this.forwardToSidebar(message);
@@ -209,6 +267,63 @@ class VoiceAssistantBackground {
         } catch (error) {
             // Sidebar might not be open, ignore the error
             console.log('Could not forward to sidebar:', error.message);
+        }
+    }
+
+    // Process autonomous goal using AI agent
+    async processAutonomousGoal(goal) {
+        console.log('Processing autonomous goal:', goal);
+        
+        try {
+            if (!this.aiService?.isInitialized()) {
+                return {
+                    success: false,
+                    error: 'AI Service not configured. Please set up your Gemini API key first.',
+                    requiresConfiguration: true
+                };
+            }
+
+            // Use autonomous agent to process the goal
+            const result = await this.autonomousAgent.processUserGoal(goal);
+            
+            return {
+                success: true,
+                result: result,
+                aiResponse: `I'll help you achieve: "${goal}". Let me break this down into steps and execute them.`
+            };
+            
+        } catch (error) {
+            console.error('Error processing autonomous goal:', error);
+            return {
+                success: false,
+                error: error.message,
+                aiResponse: `I encountered an error while trying to achieve your goal: ${error.message}`
+            };
+        }
+    }
+
+    // Configure AI service with API key
+    async configureAI(apiKey) {
+        try {
+            if (!apiKey) {
+                throw new Error('API key is required');
+            }
+
+            // In a real implementation, we'd load the actual AI service here
+            console.log('AI configuration requested (placeholder mode)');
+            
+            return {
+                success: false,
+                error: 'AI Service configuration is not yet implemented. This is a demo version.',
+                message: 'To enable full autonomous AI capabilities, please implement the Gemini API integration.'
+            };
+            
+        } catch (error) {
+            console.error('Error configuring AI:', error);
+            return {
+                success: false,
+                error: error.message
+            };
         }
     }
 }

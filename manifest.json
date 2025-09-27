@@ -9,7 +9,8 @@
     "sidePanel",
     "scripting",
     "storage",
-    "tts"
+    "tts",
+    "https://generativelanguage.googleapis.com/*"
   ],
   
   "host_permissions": [
