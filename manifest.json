@@ -1,15 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Voice Web Assistant",
-  "version": "1.0",
-  "description": "Voice-controlled web assistant for visually impaired users",
+  "name": "Autonomous Web Agent",
+  "version": "2.0",
+  "description": "AI-powered autonomous web agent with Observe -> Decide -> Act -> Verify workflow",
   
   "permissions": [
     "activeTab",
     "sidePanel",
     "scripting",
     "storage",
-    "tts"
+    "tts",
+    "tabs"
   ],
   
   "host_permissions": [
@@ -23,7 +24,10 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-script.js"],
+      "js": [
+        "web-automation.js",
+        "content-script.js"
+      ],
       "css": ["content-styles.css"],
       "run_at": "document_end"
     }
@@ -35,12 +39,25 @@
   
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Voice Web Assistant"
+    "default_title": "Autonomous Web Agent"
   },
   
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "web-agent.js",
+        "gemini-service.js", 
+        "dom-analyzer.js",
+        "error-handler.js",
+        "user-interaction.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
