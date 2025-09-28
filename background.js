@@ -1,11 +1,12 @@
 // Import agent classes for service worker
 // Service workers can't use ES modules, so we import them directly
-importScripts('gemini-service.js', 'dom-analyzer.js', 'web-automation.js', 'error-handler.js', 'user-interaction.js', 'web-agent.js');
+importScripts('config.js', 'gemini-service.js', 'dom-analyzer.js', 'web-automation.js', 'error-handler.js', 'user-interaction.js', 'web-agent.js');
 
 class AutonomousWebAssistantBackground {
     constructor() {
         this.webAgent = null;
         this.geminiApiKey = null; // Will be set from options
+        this.apiKeySource = 'unset';
         this.setupMessageListeners();
         this.setupSidePanel();
         this.initializeAgent();
@@ -15,9 +16,18 @@ class AutonomousWebAssistantBackground {
     async initializeAgent() {
         // Try to get API key from storage
         try {
+            const hardcodedKey = this.getHardcodedApiKey();
+            if (hardcodedKey) {
+                this.geminiApiKey = hardcodedKey;
+                this.apiKeySource = 'hardcoded';
+                await this.createAgent();
+                return;
+            }
+
             const result = await chrome.storage.sync.get(['geminiApiKey']);
             if (result.geminiApiKey) {
                 this.geminiApiKey = result.geminiApiKey;
+                this.apiKeySource = 'stored';
                 await this.createAgent();
             } else {
                 console.log('Gemini API key not found. Agent will be created when key is provided.');
@@ -25,6 +35,18 @@ class AutonomousWebAssistantBackground {
         } catch (error) {
             console.error('Error loading API key:', error);
         }
+    }
+
+    getHardcodedApiKey() {
+        try {
+            const key = self?.EXTENSION_CONFIG?.geminiApiKey;
+            if (typeof key === 'string' && key.trim() && key !== 'YOUR_GEMINI_API_KEY_HERE') {
+                return key.trim();
+            }
+        } catch (error) {
+            console.warn('Unable to read hardcoded Gemini API key:', error);
+        }
+        return null;
     }
 
     async createAgent() {
@@ -71,6 +93,12 @@ class AutonomousWebAssistantBackground {
                         error: error.message 
                     }));
                 return true;
+            } else if (message.type === 'GET_AGENT_STATUS') {
+                sendResponse({
+                    success: true,
+                    hasApiKey: Boolean(this.geminiApiKey),
+                    source: this.apiKeySource
+                });
             } else if (message.type === 'USER_RESPONSE') {
                 // Forward user responses to agent
                 this.handleUserResponse(message);
@@ -149,6 +177,7 @@ class AutonomousWebAssistantBackground {
             // Store API key
             await chrome.storage.sync.set({ geminiApiKey: apiKey });
             this.geminiApiKey = apiKey;
+            this.apiKeySource = 'stored';
             
             // Create new agent with the API key
             await this.createAgent();
@@ -177,18 +206,19 @@ class AutonomousWebAssistantBackground {
         }
     }
 
-    async forwardToSidebar(message) {
+    forwardToSidebar(message) {
         // Forward messages to the sidebar if it's open
-        try {
-            await chrome.runtime.sendMessage({
-                type: 'ACTION_COMPLETED',
-                description: message.message,
-                timestamp: message.timestamp
-            });
-        } catch (error) {
-            // Sidebar might not be open, ignore the error
-            console.log('Could not forward to sidebar:', error.message);
-        }
+        chrome.runtime.sendMessage({
+            type: 'ACTION_COMPLETED',
+            description: message.message,
+            level: message.level,
+            timestamp: message.timestamp
+        }, () => {
+            const lastError = chrome.runtime.lastError;
+            if (lastError && !lastError.message?.includes('Receiving end does not exist')) {
+                console.warn('Could not forward to sidebar:', lastError.message);
+            }
+        });
     }
 }
 

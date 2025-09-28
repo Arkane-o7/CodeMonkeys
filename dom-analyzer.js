@@ -19,6 +19,7 @@ class DOMAnalyzer {
             '.button',
             '.link'
         ];
+        this.viewport = { width: 1200, height: 800 };
     }
 
     /**
@@ -48,30 +49,113 @@ class DOMAnalyzer {
             throw new Error('No active tab found');
         }
 
-        return await chrome.tabs.sendMessage(tab.id, {
-            type: 'GET_PAGE_DATA'
-        });
+        // Try to get page data with retry logic for content script connection
+        const maxRetries = 3;
+        let lastError = null;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // First, try to ensure content script is injected
+                if (attempt > 1) {
+                    console.log(`DOM analyzer: Retrying page data request, attempt ${attempt}`);
+                    await this.ensureContentScriptInjected(tab);
+                }
+                
+                const response = await chrome.tabs.sendMessage(tab.id, {
+                    type: 'GET_PAGE_DATA'
+                });
+                
+                if (response && response.success !== false) {
+                    return response;
+                }
+                
+                throw new Error(response?.error || 'Invalid response from content script');
+                
+            } catch (error) {
+                lastError = error;
+                console.warn(`DOM analyzer attempt ${attempt} failed:`, error.message);
+                
+                // If this is a connection error, try to re-inject content script
+                if (error.message.includes('Could not establish connection') || 
+                    error.message.includes('Receiving end does not exist')) {
+                    
+                    if (attempt < maxRetries) {
+                        console.log('Attempting to re-inject content script...');
+                        await this.ensureContentScriptInjected(tab);
+                        await this.wait(1000); // Wait for injection
+                        continue;
+                    }
+                }
+                
+                // For other errors, don't retry
+                if (attempt === maxRetries) {
+                    break;
+                }
+            }
+        }
+        
+        throw new Error(`Failed to get page data after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
+    }
+    
+    /**
+     * Ensure content script is injected in the tab
+     */
+    async ensureContentScriptInjected(tab) {
+        try {
+            // Try to inject the content script files
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['web-automation.js', 'content-script.js']
+            });
+            
+            // Also inject CSS if needed
+            await chrome.scripting.insertCSS({
+                target: { tabId: tab.id },
+                files: ['content-styles.css']
+            });
+            
+        } catch (error) {
+            console.warn('Failed to inject content script:', error.message);
+            // Don't throw here, as script might already be injected
+        }
+    }
+    
+    /**
+     * Wait utility
+     */
+    wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
      * Extract interactive elements from page data
      */
     extractInteractiveElements(pageData) {
+        this.viewport = pageData.viewport || { width: 1200, height: 800 };
+
         const elements = [];
         let idCounter = 1;
 
+        const interactiveElements = Array.isArray(pageData.interactiveElements)
+            ? pageData.interactiveElements
+            : [];
+
         // Process each interactive element
-        pageData.interactiveElements.forEach(element => {
+        interactiveElements.forEach(element => {
+            // For elements that might be wrappers, try to find actual input inside
+            const actualElement = this.findActualInteractiveElement(element);
+            
             const processedElement = {
-                agent_id: this.generateAgentId(element, idCounter++),
-                element_type: element.tagName.toLowerCase(),
-                description: this.generateDescription(element),
-                selector: this.generateSelector(element),
-                text_content: this.cleanText(element.textContent || element.value || ''),
-                attributes: this.extractRelevantAttributes(element),
-                location: this.describeLocation(element),
-                isVisible: element.isVisible,
-                boundingRect: element.boundingRect
+                agent_id: this.generateAgentId(actualElement, idCounter++),
+                element_type: actualElement.tagName.toLowerCase(),
+                description: this.generateDescription(actualElement),
+                selector: this.generateSelector(actualElement),
+                text_content: this.cleanText(actualElement.textContent || actualElement.value || ''),
+                attributes: this.extractRelevantAttributes(actualElement),
+                location: this.describeLocation(actualElement),
+                isVisible: actualElement.isVisible,
+                boundingRect: actualElement.boundingRect,
+                isActualInput: this.isActualInputElement(actualElement)
             };
 
             elements.push(processedElement);
@@ -91,28 +175,74 @@ class DOMAnalyzer {
      * Generate unique agent ID for element
      */
     generateAgentId(element, counter) {
+        // Special handling for video elements to indicate position
+        const isVideo = this.isVideoElement(element);
+        
         // Try to use meaningful identifiers
         if (element.id) {
-            return `id_${element.id}`;
+            const baseId = `id_${element.id}`;
+            return isVideo ? `${baseId}_video_${counter}` : baseId;
         }
         if (element.name) {
-            return `name_${element.name}`;
+            const baseId = `name_${element.name}`;
+            return isVideo ? `${baseId}_video_${counter}` : baseId;
+        }
+
+        const placeholder = element.placeholder || element.attributes?.placeholder;
+        if (placeholder) {
+            const cleanPlaceholder = this.cleanText(placeholder).toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 25);
+            if (cleanPlaceholder) {
+                const baseId = `placeholder_${cleanPlaceholder}`;
+                return isVideo ? `${baseId}_video_${counter}` : baseId;
+            }
+        }
+
+        const ariaLabel = element.attributes?.['aria-label'];
+        if (ariaLabel) {
+            const cleanAria = this.cleanText(ariaLabel).toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 25);
+            if (cleanAria) {
+                const baseId = `aria_${cleanAria}`;
+                return isVideo ? `${baseId}_video_${counter}` : baseId;
+            }
         }
         
         // Use text content for buttons/links
         const text = this.cleanText(element.textContent || element.value || '');
         if (text && text.length <= 30) {
             const cleanText = text.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20);
-            return `${element.tagName.toLowerCase()}_${cleanText}`;
+            const baseId = `${element.tagName.toLowerCase()}_${cleanText}`;
+            return isVideo ? `${baseId}_video_${counter}` : baseId;
         }
         
         // Use type for inputs
         if (element.type) {
-            return `${element.tagName.toLowerCase()}_${element.type}_${counter}`;
+            const baseId = `${element.tagName.toLowerCase()}_${element.type}_${counter}`;
+            return isVideo ? `${baseId}_video` : baseId;
         }
         
         // Fallback to element type and counter
-        return `${element.tagName.toLowerCase()}_${counter}`;
+        const baseId = `${element.tagName.toLowerCase()}_${counter}`;
+        return isVideo ? `${baseId}_video` : baseId;
+    }
+    
+    /**
+     * Check if element is a video-related element
+     */
+    isVideoElement(element) {
+        const href = element.href || '';
+        const className = element.className || '';
+        const id = element.id || '';
+        const textContent = element.textContent || '';
+        
+        return (
+            href.includes('/watch') ||
+            href.includes('video') ||
+            className.includes('video') ||
+            className.includes('ytd-video') ||
+            className.includes('watch') ||
+            id.includes('video') ||
+            textContent.toLowerCase().includes('video')
+        );
     }
 
     /**
@@ -175,6 +305,25 @@ class DOMAnalyzer {
                 selectors.push(`[${attr}="${element.attributes[attr]}"]`);
             }
         });
+
+        // Use placeholder when available (common for search inputs)
+        const placeholder = element.placeholder || element.attributes?.placeholder;
+        if (placeholder) {
+            const escaped = placeholder.replace(/"/g, '\\"');
+            selectors.push(`${element.tagName.toLowerCase()}[placeholder="${escaped}"]`);
+        }
+
+        // Use aria-label when available
+        const ariaLabel = element.attributes?.['aria-label'];
+        if (ariaLabel) {
+            const escaped = ariaLabel.replace(/"/g, '\\"');
+            selectors.push(`${element.tagName.toLowerCase()}[aria-label="${escaped}"]`);
+        }
+
+        // Include type-based selector for inputs
+        if (element.type) {
+            selectors.push(`${element.tagName.toLowerCase()}[type="${element.type}"]`);
+        }
         
         // Use class for buttons/interactive elements
         if (element.className) {
@@ -217,8 +366,8 @@ class DOMAnalyzer {
         }
         
         const rect = element.boundingRect;
-        const viewportHeight = window.innerHeight || 800;
-        const viewportWidth = window.innerWidth || 1200;
+        const viewportHeight = this.viewport?.height || 800;
+        const viewportWidth = this.viewport?.width || 1200;
         
         let vertical = 'middle';
         if (rect.top < viewportHeight * 0.33) {
@@ -260,6 +409,10 @@ class DOMAnalyzer {
      * Utility methods
      */
     cleanText(text) {
+        if (!text) {
+            return '';
+        }
+
         return text.trim().replace(/\s+/g, ' ').substring(0, 100);
     }
 
@@ -329,6 +482,44 @@ class DOMAnalyzer {
         });
         
         return groups;
+    }
+    
+    /**
+     * Try to find the actual interactive element (in case current element is a wrapper)
+     */
+    findActualInteractiveElement(element) {
+        // If this is already a good input element, return as is
+        if (this.isActualInputElement(element)) {
+            return element;
+        }
+        
+        // Note: Since we're working with serialized data, we can't traverse DOM here
+        // The content script improvements will handle this logic
+        return element;
+    }
+    
+    /**
+     * Check if element is an actual input element (not a wrapper)
+     */
+    isActualInputElement(element) {
+        const tag = element.tagName?.toLowerCase();
+        
+        // Direct input elements
+        if (tag === 'input' || tag === 'textarea') {
+            return true;
+        }
+        
+        // Content editable elements
+        if (element.attributes?.contenteditable === 'true') {
+            return true;
+        }
+        
+        // Elements with role textbox
+        if (element.attributes?.role === 'textbox') {
+            return true;
+        }
+        
+        return false;
     }
 }
 

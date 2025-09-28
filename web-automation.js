@@ -20,40 +20,44 @@ class WebAutomation {
      */
     async executeAction(action) {
         const { type, parameters } = action;
+        const params = parameters || {};
         
-        this.log(`Executing action: ${type}`, parameters);
+    this.log(`Executing action: ${type} ${JSON.stringify(params)}`);
         
         try {
             switch (type.toLowerCase()) {
                 case 'goto':
-                    return await this.goto(parameters.url);
+                    return await this.goto(params);
                     
                 case 'click':
-                    return await this.click(parameters.selector);
+                    return await this.click(params);
                     
                 case 'type':
-                    return await this.type(parameters.selector, parameters.value);
+                    return await this.type(params);
+                    
+                case 'search':
+                    return await this.search(params);
                     
                 case 'select':
-                    return await this.select(parameters.selector, parameters.value);
+                    return await this.select(params);
                     
                 case 'scroll':
-                    return await this.scroll(parameters.direction, parameters.amount);
+                    return await this.scroll(params);
                     
                 case 'hover':
-                    return await this.hover(parameters.selector);
+                    return await this.hover(params);
                     
                 case 'wait_for_element':
-                    return await this.waitForElement(parameters.selector, parameters.condition);
+                    return await this.waitForElement(params);
                     
                 case 'handle_popup':
-                    return await this.handlePopup(parameters.action);
+                    return await this.handlePopup(params);
                     
                 case 'get_text':
-                    return await this.getText(parameters.selector);
+                    return await this.getText(params);
                     
                 case 'get_attribute':
-                    return await this.getAttribute(parameters.selector, parameters.attribute);
+                    return await this.getAttribute(params);
                     
                 case 'take_screenshot':
                     return await this.takeScreenshot();
@@ -70,52 +74,81 @@ class WebAutomation {
     /**
      * Navigate to URL
      */
-    async goto(url) {
-        this.log(`Navigating to: ${url}`);
+    async goto(params) {
+        const rawUrl = typeof params === 'string' ? params : params?.url;
+        this.log(`Navigating to: ${rawUrl}`);
         
-        if (!url) {
+        if (!rawUrl) {
             throw new Error('URL is required for goto action');
         }
-        
-        // Ensure URL has protocol
+
+        let url = rawUrl.trim();
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'https://' + url;
         }
         
         try {
-            await this.executeInTab({
-                type: 'NAVIGATE',
-                url: url
-            });
-            
-            // Wait for page to load
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab) {
+                throw new Error('No active tab available for navigation');
+            }
+
+            await chrome.tabs.update(tab.id, { url });
+
+            // Give the new page a moment to load and inject the content script
+            await this.wait(500);
             await this.waitForPageLoad();
             
+            // Ensure content script is ready after navigation
+            await this.ensureContentScriptReady(tab.id);
+
             return {
                 success: true,
                 message: `Successfully navigated to ${url}`,
                 url: url
             };
-        } catch (error) {
-            throw new Error(`Failed to navigate to ${url}: ${error.message}`);
+        } catch (tabError) {
+            this.log(`Primary navigation failed via chrome.tabs.update: ${tabError.message}`, 'warning');
+
+            try {
+                await this.executeInTab({
+                    type: 'NAVIGATE',
+                    url: url
+                });
+
+                await this.waitForPageLoad();
+
+                return {
+                    success: true,
+                    message: `Successfully navigated to ${url}`,
+                    url: url
+                };
+            } catch (fallbackError) {
+                throw new Error(`Failed to navigate to ${url}: ${fallbackError.message}`);
+            }
         }
     }
 
     /**
      * Click element
      */
-    async click(selector) {
-        this.log(`Clicking element: ${selector}`);
+    async click(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const command = {
+            type: 'CLICK',
+            selector,
+            agentId: params.agent_id || params.agentId,
+            text: params.text || params.label || params.description
+        };
         
-        if (!selector) {
-            throw new Error('Selector is required for click action');
+    this.log(`Clicking element ${command.selector || command.text || 'target'}`);
+        
+        if (!command.selector && !command.text) {
+            throw new Error('Selector or descriptive text is required for click action');
         }
         
         try {
-            const result = await this.executeInTab({
-                type: 'CLICK',
-                selector: selector
-            });
+            const result = await this.executeInTab(command);
             
             if (!result.success) {
                 throw new Error(result.error || 'Click action failed');
@@ -124,32 +157,45 @@ class WebAutomation {
             // Small delay after click
             await this.wait(500);
             
+            // For video clicks, wait longer for page transition
+            if (this.isVideoClick(command)) {
+                this.log('Video element clicked, waiting for page transition...');
+                await this.wait(2000);
+            }
+            
             return {
                 success: true,
-                message: `Successfully clicked ${selector}`,
-                selector: selector
+                message: `Successfully clicked ${command.selector || command.text}`,
+                selector: command.selector || null
             };
         } catch (error) {
-            throw new Error(`Failed to click ${selector}: ${error.message}`);
+            const descriptor = command.selector || command.text || 'target';
+            throw new Error(`Failed to click ${descriptor}: ${error.message}`);
         }
     }
 
     /**
      * Type text into element
      */
-    async type(selector, text) {
-        this.log(`Typing into ${selector}: ${text}`);
+    async type(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const text = params.value ?? params.text ?? '';
+        const command = {
+            type: 'TYPE',
+            selector,
+            agentId: params.agent_id || params.agentId,
+            text: String(text),
+            append: Boolean(params.append)
+        };
         
-        if (!selector || text === undefined) {
-            throw new Error('Selector and text are required for type action');
+    this.log(`Typing into ${command.selector || 'target'} with text length ${command.text.length}`);
+        
+        if (!command.selector && !command.agentId) {
+            throw new Error('Selector or agent identifier is required for type action');
         }
         
         try {
-            const result = await this.executeInTab({
-                type: 'TYPE',
-                selector: selector,
-                text: String(text)
-            });
+            const result = await this.executeInTab(command);
             
             if (!result.success) {
                 throw new Error(result.error || 'Type action failed');
@@ -157,31 +203,80 @@ class WebAutomation {
             
             return {
                 success: true,
-                message: `Successfully typed into ${selector}`,
-                selector: selector,
+                message: `Successfully typed into ${command.selector || 'target'}`,
+                selector: command.selector || null,
                 text: text
             };
         } catch (error) {
-            throw new Error(`Failed to type into ${selector}: ${error.message}`);
+            const descriptor = command.selector || 'target';
+            throw new Error(`Failed to type into ${descriptor}: ${error.message}`);
+        }
+    }
+
+    /**
+     * Search (type + submit)
+     */
+    async search(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const query = params.value ?? params.text ?? params.query ?? '';
+        const command = {
+            type: 'SEARCH',
+            selector,
+            agentId: params.agent_id || params.agentId,
+            text: String(query)
+        };
+        
+        this.log(`Searching for "${query}" in ${command.selector || 'target'}`);
+        
+        if (!command.selector && !command.agentId) {
+            throw new Error('Selector or agent identifier is required for search action');
+        }
+        
+        try {
+            const result = await this.executeInTab(command);
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Search action failed');
+            }
+            
+            return {
+                success: true,
+                message: `Successfully searched for "${query}"`,
+                selector: command.selector || null,
+                query: query
+            };
+        } catch (error) {
+            const descriptor = command.selector || 'target';
+            throw new Error(`Failed to search in ${descriptor}: ${error.message}`);
         }
     }
 
     /**
      * Select option from dropdown
      */
-    async select(selector, value) {
-        this.log(`Selecting from ${selector}: ${value}`);
+    async select(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const value = params.value ?? params.option ?? params.text;
+        const command = {
+            type: 'SELECT',
+            selector,
+            agentId: params.agent_id || params.agentId,
+            value: value !== undefined ? String(value) : undefined,
+            optionText: params.optionText || params.text
+        };
         
-        if (!selector || value === undefined) {
-            throw new Error('Selector and value are required for select action');
+    this.log(`Selecting option on ${command.selector}`);
+        
+        if (!command.selector) {
+            throw new Error('Selector is required for select action');
+        }
+        
+        if (command.value === undefined && !command.optionText) {
+            throw new Error('Value or option text is required for select action');
         }
         
         try {
-            const result = await this.executeInTab({
-                type: 'SELECT',
-                selector: selector,
-                value: String(value)
-            });
+            const result = await this.executeInTab(command);
             
             if (!result.success) {
                 throw new Error(result.error || 'Select action failed');
@@ -189,26 +284,33 @@ class WebAutomation {
             
             return {
                 success: true,
-                message: `Successfully selected ${value} from ${selector}`,
-                selector: selector,
-                value: value
+                message: `Successfully selected option in ${command.selector}`,
+                selector: command.selector,
+                value: result.value ?? command.value
             };
         } catch (error) {
-            throw new Error(`Failed to select from ${selector}: ${error.message}`);
+            throw new Error(`Failed to select from ${command.selector}: ${error.message}`);
         }
     }
 
     /**
      * Scroll page
      */
-    async scroll(direction = 'down', amount = 300) {
-        this.log(`Scrolling ${direction} by ${amount}px`);
+    async scroll(params = {}) {
+        const direction = params.direction || 'down';
+        const amount = Number(params.amount ?? 300);
+        const selector = params.selector || params.agent_id || params.agentId;
+        const block = params.block || 'center';
+        
+    this.log(`Scrolling ${direction} by ${amount}px${selector ? ' toward ' + selector : ''}`);
         
         try {
             const result = await this.executeInTab({
                 type: 'SCROLL',
                 direction: direction,
-                amount: Number(amount)
+                amount: amount,
+                selector: selector,
+                block: block
             });
             
             if (!result.success) {
@@ -222,7 +324,8 @@ class WebAutomation {
                 success: true,
                 message: `Successfully scrolled ${direction}`,
                 direction: direction,
-                amount: amount
+                amount: amount,
+                selector: selector || null
             };
         } catch (error) {
             throw new Error(`Failed to scroll: ${error.message}`);
@@ -232,8 +335,9 @@ class WebAutomation {
     /**
      * Hover over element
      */
-    async hover(selector) {
-        this.log(`Hovering over: ${selector}`);
+    async hover(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+    this.log(`Hovering over ${selector}`);
         
         if (!selector) {
             throw new Error('Selector is required for hover action');
@@ -242,7 +346,8 @@ class WebAutomation {
         try {
             const result = await this.executeInTab({
                 type: 'HOVER',
-                selector: selector
+                selector: selector,
+                agentId: params.agent_id || params.agentId
             });
             
             if (!result.success) {
@@ -262,21 +367,24 @@ class WebAutomation {
     /**
      * Wait for element to meet condition
      */
-    async waitForElement(selector, condition = 'visible', timeout = null) {
-        this.log(`Waiting for element ${selector} to be ${condition}`);
+    async waitForElement(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const condition = params.condition || 'visible';
+        const waitTimeout = params.timeout || params.waitTimeout || this.timeout;
+        
+    this.log(`Waiting for ${selector} to be ${condition} (timeout ${waitTimeout}ms)`);
         
         if (!selector) {
             throw new Error('Selector is required for wait_for_element action');
         }
-        
-        const waitTimeout = timeout || this.timeout;
         
         try {
             const result = await this.executeInTab({
                 type: 'WAIT_FOR_ELEMENT',
                 selector: selector,
                 condition: condition,
-                timeout: waitTimeout
+                timeout: waitTimeout,
+                agentId: params.agent_id || params.agentId
             });
             
             if (!result.success) {
@@ -297,7 +405,8 @@ class WebAutomation {
     /**
      * Handle popup/modal
      */
-    async handlePopup(action = 'accept') {
+    async handlePopup(params = {}) {
+        const action = params.action || 'dismiss';
         this.log(`Handling popup with action: ${action}`);
         
         try {
@@ -323,8 +432,9 @@ class WebAutomation {
     /**
      * Get text content of element
      */
-    async getText(selector) {
-        this.log(`Getting text from: ${selector}`);
+    async getText(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+    this.log(`Getting text from ${selector}`);
         
         if (!selector) {
             throw new Error('Selector is required for get_text action');
@@ -333,7 +443,8 @@ class WebAutomation {
         try {
             const result = await this.executeInTab({
                 type: 'GET_TEXT',
-                selector: selector
+                selector: selector,
+                agentId: params.agent_id || params.agentId
             });
             
             if (!result.success) {
@@ -354,8 +465,10 @@ class WebAutomation {
     /**
      * Get attribute value of element
      */
-    async getAttribute(selector, attribute) {
-        this.log(`Getting ${attribute} attribute from: ${selector}`);
+    async getAttribute(params = {}) {
+        const selector = params.selector || params.agent_id || params.agentId;
+        const attribute = params.attribute;
+    this.log(`Getting attribute ${attribute} from ${selector}`);
         
         if (!selector || !attribute) {
             throw new Error('Selector and attribute are required for get_attribute action');
@@ -365,7 +478,8 @@ class WebAutomation {
             const result = await this.executeInTab({
                 type: 'GET_ATTRIBUTE',
                 selector: selector,
-                attribute: attribute
+                attribute: attribute,
+                agentId: params.agent_id || params.agentId
             });
             
             if (!result.success) {
@@ -426,6 +540,15 @@ class WebAutomation {
             this.log(`Failed to get page HTML: ${error.message}`, 'error');
             return '';
         }
+    }
+
+    async getActiveTabUrl() {
+        if (typeof chrome === 'undefined' || !chrome.tabs) {
+            throw new Error('Chrome extension context not available');
+        }
+
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        return tab?.url || '';
     }
 
     /**
@@ -549,6 +672,85 @@ class WebAutomation {
         };
         
         return recommendations[elementType] || [];
+    }
+    
+    /**
+     * Ensure content script is ready in the specified tab
+     */
+    async ensureContentScriptReady(tabId, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // Test if content script is responsive
+                const response = await chrome.tabs.sendMessage(tabId, {
+                    type: 'GET_TITLE'
+                });
+                
+                if (response && response.success !== false) {
+                    this.log('Content script is ready');
+                    return true;
+                }
+            } catch (error) {
+                this.log(`Content script test attempt ${attempt} failed: ${error.message}`, 'warning');
+                
+                // Try to inject content script if connection failed
+                if (error.message.includes('Could not establish connection') || 
+                    error.message.includes('Receiving end does not exist')) {
+                    
+                    try {
+                        await chrome.scripting.executeScript({
+                            target: { tabId },
+                            files: ['web-automation.js', 'content-script.js']
+                        });
+                        
+                        await chrome.scripting.insertCSS({
+                            target: { tabId },
+                            files: ['content-styles.css']
+                        });
+                        
+                        this.log('Re-injected content script');
+                        
+                        // Wait for initialization
+                        await this.wait(1000);
+                        
+                    } catch (injectError) {
+                        this.log(`Failed to inject content script: ${injectError.message}`, 'warning');
+                    }
+                }
+            }
+            
+            if (attempt < maxRetries) {
+                await this.wait(500);
+            }
+        }
+        
+        this.log('Content script may not be ready, proceeding anyway', 'warning');
+        return false;
+    }
+    
+    /**
+     * Check if this is a video element click
+     */
+    isVideoClick(command) {
+        if (!command.selector && !command.text) return false;
+        
+        const selector = (command.selector || '').toLowerCase();
+        const text = (command.text || '').toLowerCase();
+        
+        // Video-related selectors/text patterns
+        const videoPatterns = [
+            'video-title',
+            'watch',
+            'play',
+            'thumbnail',
+            selector.includes('video'),
+            text.includes('video'),
+            text.includes('play'),
+            // YouTube specific
+            selector.includes('ytd-video-renderer'),
+            selector.includes('yt-simple-endpoint')
+        ];
+        
+        return videoPatterns.some(pattern => pattern);
     }
 }
 

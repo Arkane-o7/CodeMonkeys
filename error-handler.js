@@ -68,39 +68,16 @@ class ErrorHandler {
         try {
             const recentErrors = this.errorHistory.slice(-3);
             
-            const prompt = `
-RECOVERY STRATEGY DETERMINATION
-
-Failed Step: "${step.description}"
-Error: "${error}"
-Attempt Number: ${attempt}
-Current Context: ${JSON.stringify(context)}
-Recent Error History: ${JSON.stringify(recentErrors)}
-
-The web automation agent failed to complete this step. What's the best recovery strategy?
-
-Available strategies:
-1. retry_step - Try the same step again (good for temporary issues)
-2. alternative_action - Try a different approach for the same goal
-3. skip_step - Move to next step if this one isn't critical
-4. reorient_agent - Agent is lost, needs to figure out where it is
-5. ask_user_help - Request human intervention
-
-Consider:
-- How many times has this step failed?
-- What type of error occurred?
-- Are there patterns in recent failures?
-- Is this a critical step or can it be skipped?
-
-Respond with JSON:
-{
-    "strategy": "retry_step|alternative_action|skip_step|reorient_agent|ask_user_help",
-    "reasoning": "detailed explanation of why this strategy was chosen",
-    "confidence": 0.0-1.0,
-    "alternative_approach": "if alternative_action, describe the new approach",
-    "user_question": "if ask_user_help, what to ask the user"
-}
-            `;
+            const prompt = [
+                'SELECT RECOVERY STRATEGY',
+                `Failed step: ${step.description}`,
+                `Error: ${error}`,
+                `Attempt: ${attempt}`,
+                `Context: ${JSON.stringify(context)}`,
+                `Recent errors: ${JSON.stringify(recentErrors)}`,
+                'Strategies: retry_step|alternative_action|skip_step|reorient_agent|ask_user_help',
+                'JSON ONLY {"strategy":"","reasoning":"","confidence":0.0-1.0,"alternative_approach":{},"user_question":""}'
+            ].join('\n');
 
             const response = await this.agent.geminiService.query(prompt);
             
@@ -342,26 +319,14 @@ Respond with JSON:
         try {
             const currentElements = await this.agent.domAnalyzer.analyzeCurrentPage();
             
-            const prompt = `
-GENERATE ALTERNATIVE APPROACH
-
-Failed Step: "${errorInfo.step.description}"
-Original Goal: "${errorInfo.step.goal}"
-Error: "${errorInfo.error}"
-Available Elements: ${JSON.stringify(currentElements.interactive_elements.slice(0, 15))}
-
-The original approach failed. What alternative approach should the agent try?
-Consider different selectors, interaction methods, or sequences of actions.
-
-Respond with JSON:
-{
-    "alternative_action": {
-        "type": "action_type",
-        "parameters": {...}
-    },
-    "reasoning": "why this alternative should work better"
-}
-            `;
+            const prompt = [
+                'SUGGEST ALTERNATIVE ACTION',
+                `Step: ${errorInfo.step.description}`,
+                `Goal: ${errorInfo.step.goal}`,
+                `Error: ${errorInfo.error}`,
+                `Elements: ${JSON.stringify(currentElements.interactive_elements.slice(0, 15))}`,
+                'JSON ONLY {"alternative_action":{"type":"","parameters":{}},"reasoning":""}'
+            ].join('\n');
 
             const response = await this.agent.geminiService.query(prompt);
             

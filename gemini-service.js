@@ -5,8 +5,9 @@
 class GeminiService {
     constructor(apiKey, options = {}) {
         this.apiKey = apiKey;
-        this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
-        this.model = options.model || 'gemini-pro';
+        this.modelCandidates = this.initializeModelCandidates(options.model);
+        this.model = this.modelCandidates[0];
+        this.baseUrl = this.buildEndpoint(this.model);
         this.temperature = options.temperature || 0.1; // Lower for more deterministic responses
         this.maxRetries = options.maxRetries || 3;
         
@@ -20,22 +21,46 @@ class GeminiService {
      */
     async query(prompt, options = {}) {
         const retries = options.retries || this.maxRetries;
-        
-        for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-                const response = await this.makeRequest(prompt, options);
-                return this.parseResponse(response, options);
-            } catch (error) {
-                console.error(`Gemini API attempt ${attempt} failed:`, error.message);
-                
-                if (attempt === retries) {
-                    throw new Error(`Gemini API failed after ${retries} attempts: ${error.message}`);
+
+        for (const candidate of this.modelCandidates) {
+            console.log(`Trying model: ${candidate}`);
+            for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                    console.log(`Making request with model ${candidate}, attempt ${attempt}`);
+                    const response = await this.makeRequest(prompt, { ...options, model: candidate });
+                    console.log(`Request successful, parsing response for model ${candidate}`);
+                    this.model = candidate;
+                    this.baseUrl = this.buildEndpoint(candidate);
+                    return this.parseResponse(response, options);
+                } catch (error) {
+                    console.error(`Error with model ${candidate}, attempt ${attempt}:`, error.message);
+                    
+                    if (this.isModelNotFound(error)) {
+                        console.warn(`Gemini model not found (${candidate}). Trying next available model...`);
+                        break; // Move to next candidate
+                    }
+
+                    const isServiceUnavailable = /\b503\b/.test(error.message);
+                    const attemptInfo = `Gemini API attempt ${attempt} failed for model ${candidate}`;
+                    console.error(`${attemptInfo}:`, error.message);
+
+                    if (attempt === retries) {
+                        if (isServiceUnavailable) {
+                            console.warn(`Gemini model ${candidate} returned 503 after ${retries} attempts. Trying next available model...`);
+                            break; // Move to next candidate model
+                        }
+
+                        const guidance = error.message;
+                        throw new Error(`Gemini API failed after ${retries} attempts: ${guidance}`);
+                    }
+                    
+                    // Wait before retry (exponential backoff)
+                    await this.wait(Math.pow(2, attempt) * 1000);
                 }
-                
-                // Wait before retry (exponential backoff)
-                await this.wait(Math.pow(2, attempt) * 1000);
             }
         }
+
+        throw new Error('Gemini API models are unavailable. Verify your API key and enabled models in Google AI Studio.');
     }
 
     /**
@@ -56,7 +81,9 @@ class GeminiService {
             }
         };
 
-        const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+        const endpoint = options.model ? this.buildEndpoint(options.model) : this.baseUrl;
+
+        const response = await fetch(`${endpoint}?key=${this.apiKey}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -66,10 +93,54 @@ class GeminiService {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            throw new Error(`Gemini API error ${response.status}: ${errorData.error?.message || response.statusText}`);
+            const retryAfterHeader = response.headers?.get?.('retry-after');
+            const retryDetails = Array.isArray(errorData?.error?.details)
+                ? errorData.error.details.find(detail => detail?.retryDelay)
+                : null;
+
+            let extra = '';
+            if (retryAfterHeader) {
+                extra += ` Retry-After header: ${retryAfterHeader}.`;
+            }
+            if (retryDetails?.retryDelay) {
+                const seconds = Number(retryDetails.retryDelay.seconds || 0);
+                const nanos = Number(retryDetails.retryDelay.nanos || 0) / 1e9;
+                const total = seconds + nanos;
+                if (total > 0) {
+                    extra += ` Retry delay suggested: ${total.toFixed(2)}s.`;
+                }
+            }
+
+            throw new Error(`Gemini API error ${response.status}: ${errorData.error?.message || response.statusText}.${extra}`);
         }
 
         return await response.json();
+    }
+
+    initializeModelCandidates(preferredModel) {
+        const defaults = [
+            'gemini-2.0-flash-lite',
+            'gemini-1.5-flash'
+        ];
+
+        if (preferredModel) {
+            return [preferredModel, ...defaults.filter(model => model !== preferredModel)];
+        }
+
+        return defaults;
+    }
+
+    isModelNotFound(error) {
+        if (!error || !error.message) {
+            return false;
+        }
+
+        return /\b404\b/.test(error.message) && error.message.includes('models/');
+    }
+
+    buildEndpoint(modelName) {
+        const model = modelName || this.model;
+        return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     }
 
     /**
@@ -95,7 +166,22 @@ Remember to respond with valid JSON when requested, and be specific and actionab
      */
     parseResponse(response, options = {}) {
         try {
-            if (!response.candidates || response.candidates.length === 0) {
+            // Debug logging to see actual response structure
+            console.log('Gemini API Response:', JSON.stringify(response, null, 2));
+            
+            if (!response || typeof response !== 'object') {
+                throw new Error('Invalid response format from Gemini API');
+            }
+            
+            if (!response.candidates) {
+                throw new Error(`No candidates in response. Response keys: ${Object.keys(response).join(', ')}`);
+            }
+            
+            if (!Array.isArray(response.candidates)) {
+                throw new Error(`Candidates is not an array. Type: ${typeof response.candidates}`);
+            }
+            
+            if (response.candidates.length === 0) {
                 throw new Error('No response candidates received from Gemini');
             }
 
@@ -111,9 +197,16 @@ Remember to respond with valid JSON when requested, and be specific and actionab
             }
 
             // If expecting JSON, try to parse it
-            if (options.expectJson !== false && this.looksLikeJson(text)) {
+            const extracted = this.extractJson(text);
+            const trimmedExtracted = extracted.trim();
+
+            if (options.expectJson !== false) {
+                if (!this.looksLikeJson(trimmedExtracted)) {
+                    throw new Error(`Expected JSON response but received: ${text.slice(0, 200)}...`);
+                }
+
                 try {
-                    return JSON.parse(this.extractJson(text));
+                    return JSON.parse(trimmedExtracted);
                 } catch (jsonError) {
                     console.warn('Failed to parse JSON response:', jsonError.message);
                     console.warn('Raw response:', text);
@@ -124,12 +217,11 @@ Remember to respond with valid JSON when requested, and be specific and actionab
                         return fixedJson;
                     }
                     
-                    // If still can't parse, return raw text
-                    return { raw_response: text, parse_error: jsonError.message };
+                    throw new Error(`Gemini returned malformed JSON: ${jsonError.message}`);
                 }
             }
 
-            return text;
+            return trimmedExtracted || text;
             
         } catch (error) {
             console.error('Error parsing Gemini response:', error);
@@ -179,6 +271,55 @@ Remember to respond with valid JSON when requested, and be specific and actionab
         }
     }
 
+    sanitizeHtmlSnippet(html, maxLength = 2000) {
+        if (!html) {
+            return '';
+        }
+
+        const withoutScripts = html
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '');
+
+        const collapsedWhitespace = withoutScripts.replace(/\s+/g, ' ').trim();
+        const snippet = collapsedWhitespace.length > maxLength
+            ? `${collapsedWhitespace.substring(0, maxLength)} ...[truncated]`
+            : collapsedWhitespace;
+
+        return snippet;
+    }
+
+    extractRetryDelayMs(message = '') {
+        if (!message) {
+            return 0;
+        }
+
+        const retryInMatch = message.match(/retry\s+in\s+([0-9]+(?:\.[0-9]+)?)s/i);
+        if (retryInMatch) {
+            const seconds = parseFloat(retryInMatch[1]);
+            if (!Number.isNaN(seconds) && seconds > 0) {
+                return seconds * 1000;
+            }
+        }
+
+        const headerMatch = message.match(/Retry-After header:\s*([0-9.]+)/i);
+        if (headerMatch) {
+            const seconds = parseFloat(headerMatch[1]);
+            if (!Number.isNaN(seconds) && seconds > 0) {
+                return seconds * 1000;
+            }
+        }
+
+        const suggestedMatch = message.match(/Retry delay suggested:\s*([0-9.]+)s/i);
+        if (suggestedMatch) {
+            const seconds = parseFloat(suggestedMatch[1]);
+            if (!Number.isNaN(seconds) && seconds > 0) {
+                return seconds * 1000;
+            }
+        }
+
+        return 0;
+    }
+
     /**
      * Specialized method for task triage
      */
@@ -199,7 +340,14 @@ Respond with JSON:
 }
         `;
 
-        return await this.query(prompt);
+        try {
+            const result = await this.query(prompt);
+            console.log('Triage query result:', result);
+            return result;
+        } catch (error) {
+            console.error('Triage task error:', error);
+            throw error;
+        }
     }
 
     /**
@@ -234,40 +382,30 @@ Respond with JSON:
      * Analyze DOM and extract interactive elements
      */
     async analyzeDom(htmlContent) {
-        // Truncate HTML if too long (Gemini has token limits)
-        const maxLength = 8000;
-        const truncatedHtml = htmlContent.length > maxLength 
-            ? htmlContent.substring(0, maxLength) + '...[truncated]'
-            : htmlContent;
+        const cleanedHtml = this.sanitizeHtmlSnippet(htmlContent, 2500);
 
         const prompt = `
-Analyze this HTML and identify all interactive elements that a web automation agent could use.
+Analyze this HTML snippet and list interactive elements (link, button, input, select, textarea).
+Return concise JSON only.
 
-HTML Content:
-${truncatedHtml}
+HTML:
+${cleanedHtml}
 
-Extract elements like: buttons, links, inputs, selects, textareas, and other interactive elements.
-
-Respond with JSON:
+JSON schema:
 {
-    "interactive_elements": [
-        {
-            "agent_id": "short_descriptive_id",
-            "element_type": "button|link|input|select|textarea|etc",
-            "description": "what this element does",
-            "selector": "CSS selector or xpath",
-            "text_content": "visible text",
-            "attributes": {
-                "id": "id_value",
-                "class": "class_value",
-                "name": "name_value",
-                "type": "input_type"
-            },
-            "location": "approximate position description"
-        }
-    ],
-    "page_summary": "brief description of what this page does",
-    "total_elements": number
+  "interactive_elements": [
+    {
+      "agent_id": "short id",
+      "element_type": "button|link|input|select|textarea",
+      "description": "purpose",
+      "selector": "CSS selector or xpath",
+      "text_content": "visible label",
+      "attributes": { "id": "", "name": "", "class": "", "type": "" },
+      "location": "approximate position"
+    }
+  ],
+  "page_summary": "brief",
+  "total_elements": number
 }
         `;
 

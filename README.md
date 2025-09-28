@@ -23,6 +23,16 @@ A browser extension that provides voice-controlled web accessibility for visuall
 4. Click "Load unpacked" and select the extension folder
 5. The Voice Web Assistant icon should appear in your toolbar
 
+## 🔑 Gemini API Key Setup
+
+The autonomous agent requires a Gemini API key. For local testing you can embed it directly in the extension:
+
+1. Open `config.js`
+2. Replace `YOUR_GEMINI_API_KEY_HERE` with your actual key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+3. Reload the unpacked extension in your browser
+
+> ⚠️ **Security reminder:** Hardcoding secrets is only safe for private, local use. Remove or replace the key with a placeholder before committing or pushing code to any remote repository.
+
 ### For Firefox:
 
 1. Open Firefox and navigate to `about:debugging`
@@ -131,8 +141,14 @@ The extension provides rich visual feedback to help users understand what's happ
 - Voice processing happens locally in browser
 - No personal information is stored
 - Commands are processed client-side only
+- Avoid committing real API keys. When sharing or pushing the code, replace the key in `config.js` with a placeholder and regenerate it if it has already been exposed.
 
-## 🤝 Contributing
+## � Troubleshooting
+
+- **Gemini API 503 Service Unavailable** – The Google AI service occasionally rate-limits or pauses the `generateContent` endpoint. The extension will retry automatically with exponential backoff and surface a friendly message if all attempts fail. Wait 10–20 seconds, then run the command again. Persistent 503 responses usually clear up after a short cool-down period.
+- **Gemini API 404 Model Not Found** – Google periodically rotates model identifiers. The extension now falls back through `gemini-1.5-flash-latest`, `gemini-1.5-flash`, and `gemini-pro`. If all fail, visit Google AI Studio → *Models* to confirm the IDs available to your API key, then add the preferred model name to `initializeModelCandidates` in `gemini-service.js`.
+
+## �🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
